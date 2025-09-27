@@ -3,5 +3,4 @@ datasets
 tqdm
 ipywidgets
 transformers>=4.38
-torch>=2.0
 einops

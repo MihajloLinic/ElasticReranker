@@ -144,3 +144,31 @@ Troubleshooting
 
 Notes
 - The full reference implementation (including JinaReranker, candidate text builder, and retrieve_and_rerank) is in sample.ipynb. You can copy it into a .py module for reuse in your application.
+
+
+---
+
+Preventing duplicates by fixing indexing
+- We now assign a stable Elasticsearch _id for each document during indexing so that re-running the indexer overwrites existing docs instead of creating duplicates.
+- ID priority (first non-empty wins): Uniq Id → UniqId → uniq_id → asin → Product Url → Model Number → Upc Ean Code → Product Name; fallback: SHA1 hash of selected fields.
+- Re-index guidance:
+  - If your current index already contains duplicates, delete and rebuild it to purge them (e.g., es.indices.delete(index=INDEX, ignore=[400,404]) and then run the indexing cell again).
+  - Future indexing runs will overwrite documents with the same _id rather than adding new ones.
+- Optional: add keyword subfields for the chosen unique identifier so you can filter or collapse by it later if needed.
+
+
+---
+
+Server-side deduplication (collapse_key; no client-side dedup)
+- The notebook now prevents duplicate hits directly at the Elasticsearch layer using field collapsing on a looser grouping key.
+- Each document keeps a strict uniq_key (also used as _id) for upserts, and additionally stores collapse_key (keyword) derived from a normalized Product Name (lowercased, non-alphanumeric removed, whitespace collapsed). If no title is present we fall back to uniq_key.
+- All search requests use collapse: {"field": "collapse_key"} so ES returns at most one hit per normalized-title group.
+- Why this matters: Near-duplicates with different URLs/IDs won't appear multiple times; re-indexing still overwrites by _id via uniq_key.
+- How to apply on an existing index:
+  1) If you previously indexed without collapse_key, delete the index and re-run the indexing cell to populate collapse_key (PowerShell in notebook context):
+     es.indices.delete(index=INDEX, ignore=[400,404])
+     # then run the indexing cell again
+  2) Alternatively, reindex into a fresh index that has collapse_key mapped as keyword.
+- Advanced:
+  - To influence which representative doc is returned per group, set an explicit sort and/or use inner_hits with collapse to fetch more docs from a group.
+  - If you have true variants that should not collapse, adjust how collapse_key is derived (e.g., include model/SKU).

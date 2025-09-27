@@ -77,3 +77,35 @@ Edge cases and guidance
 
 Bottom line
 - Yes—the combination of ES retrieval + structured filters + a cross-encoder reranker is designed for natural language intent, not just exact matching. It will handle queries like “lightweight wireless headphones for travel under $150” effectively, provided you enforce numeric constraints with filters and let the reranker adjudicate the nuanced parts (“lightweight”, “travel”).
+
+
+---
+
+Preventing duplicates by fixing indexing
+- Root cause: Duplicate documents were created when indexing multiple times or when the source contained repeated rows and ES auto-generated IDs.
+- Fix: We now assign a stable Elasticsearch _id for each document during indexing so that re-running the indexer overwrites existing docs instead of creating duplicates.
+- ID priority (first non-empty wins): Uniq Id → UniqId → uniq_id → asin → Product Url → Model Number → Upc Ean Code → Product Name; fallback: SHA1 hash of selected fields.
+- Re-index guidance:
+  - If your current index already contains duplicates, delete and rebuild it to purge them (e.g., es.indices.delete(index=INDEX, ignore=[400,404]) and re-run the indexing cell).
+  - Future indexing runs will overwrite documents with the same _id rather than adding new ones.
+- Optional: add keyword subfields for the chosen unique identifier so you can filter or collapse by it later if needed.
+
+
+---
+
+Server-side deduplication (collapse_key)
+- Goal: Stop duplicates at the server so the client does not need to deduplicate.
+- What changed in the notebook:
+  - Each document keeps a strict uniq_key (also used as _id) for upserts and additionally stores a collapse_key (keyword) derived from a normalized Product Name (lowercased, non-alphanumeric removed, whitespace collapsed). If no title is present we fall back to uniq_key.
+  - The index mapping includes collapse_key as a keyword so it can be used for Elasticsearch field collapsing.
+  - All searches pass collapse: {"field": "collapse_key"}, which makes ES return at most one hit per normalized-title group.
+- Why this works: Even if upstream rows had different IDs/URLs, normalized titles often identify the same product, so collapsing by collapse_key removes duplicates. Re-indexes still overwrite by _id via uniq_key, preventing accumulation.
+- Reindex guidance:
+  - If your current index was created before collapse_key existed, delete it and re-run the indexing cell so collapse_key is populated on all documents:
+    es.indices.delete(index=INDEX, ignore=[400,404])
+    # then run the indexing cell again
+  - Alternatively, reindex into a new index that has collapse_key mapped as keyword.
+- Advanced options:
+  - Use sort with collapse to control which representative doc is returned per group (e.g., most recent or highest score).
+  - Use inner_hits with collapse to fetch additional docs within the same group if needed.
+  - If some near-duplicates should not collapse, adjust how collapse_key is derived (e.g., include model/SKU).
