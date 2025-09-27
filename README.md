@@ -172,3 +172,51 @@ Server-side deduplication (collapse_key; no client-side dedup)
 - Advanced:
   - To influence which representative doc is returned per group, set an explicit sort and/or use inner_hits with collapse to fetch more docs from a group.
   - If you have true variants that should not collapse, adjust how collapse_key is derived (e.g., include model/SKU).
+
+
+---
+
+Updated 2025-09-27
+
+Project structure
+- README.md — overview, setup, deployment, and updates (this file)
+- guidelines.md — deployment, operations, and contributing guidelines
+- jinaai_jina-reranker-v2-base-multilingua.md — detailed fine-tuning guidance (pointwise/pairwise, hard negatives, LoRA)
+- requirements.txt — Python dependencies
+- sample.ipynb — end-to-end indexing, retrieval, and reranking demo
+- models\ — place local models here (e.g., models\fine_tuned_reranker)
+
+Serbian-only fine-tuning quick guide
+- Goal: specialize the cross‑encoder reranker for Serbian without changing the task.
+- Start with supervised Serbian pairs (query, document, label). Prefer hard negatives from ES SERPs.
+- Conservative hyperparameters for an “extra” specialization pass:
+  - LR 5e-6 to 1e-5, 1–2 epochs, effective batch size 16–64, max_length 256–320, warmup ~5%.
+  - Objective: num_labels=1 with BCEWithLogitsLoss (binary) or MSE (graded); or pairwise MarginRankingLoss.
+- Keep tokenizer; do not change vocab. Optionally train LoRA adapters to preserve base multilingual ability.
+- Full details and code snippets: see jinaai_jina-reranker-v2-base-multilingua.md
+
+Using a locally fine‑tuned model
+- Save your fine‑tuned model under: models\fine_tuned_reranker
+- Replace the model name/path wherever you load the model:
+  - PowerShell / Python example:
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    import torch
+    MODEL_PATH = "models\\fine_tuned_reranker"
+    tok = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH, trust_remote_code=True).eval().to("cuda" if torch.cuda.is_available() else "cpu")
+- In your reranking code, pass pairs: tokenizer([query]*len(docs), docs, truncation=True, padding=True, max_length=256)
+
+Evaluation (recommended)
+- Build a fixed candidate pool per query (e.g., top 100 from ES using the same query/settings across models).
+- Metrics: nDCG@10 (graded labels), MRR@10 (binary), Recall@50. Track latency for reranking.
+- Validate baseline (ES only) → ES + pretrained reranker → ES + Serbian‑fine‑tuned reranker.
+- Use the same pool and random seed to compare fairly; early stop on Serbian nDCG@10.
+
+Serbian robustness tips
+- Latin and Cyrillic: expose both scripts during training; optionally transliterate a fraction of samples.
+- Diacritics: include with and without diacritics to match real user queries.
+- Ekavian/Ijekavian variants: include both forms when relevant.
+- Preserve model numbers/brands; avoid over‑normalization of alphanumerics and hyphens.
+
+Where to find the fine‑tuning playbook
+- See jinaai_jina-reranker-v2-base-multilingua.md for end‑to‑end guidance (data formats, losses, hyperparameters, hard negative mining, PEFT/LoRA setup, ES integration patterns, and evaluation).

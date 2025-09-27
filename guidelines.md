@@ -303,3 +303,90 @@ References
 - Elastic docs: https://www.elastic.co/guide/
 - ECK operator: https://www.elastic.co/guide/en/cloud-on-k8s/current/index.html
 - Transformers: https://huggingface.co/docs/transformers/index
+
+
+---
+
+Contributing, Privacy, and Training Guidelines (Updated 2025-09-27)
+
+1. Contribution workflow
+- Branching
+  - Use short, descriptive names: feature/<topic>, fix/<topic>, docs/<topic>, ops/<topic>.
+- Pull Requests
+  - PR description: what changed, why, and how to validate.
+  - Include screenshots or metric tables when relevant (e.g., nDCG/MRR deltas).
+  - Link to any notebooks or scripts used for evaluation; ensure they run on Windows (PowerShell) with the provided requirements.txt.
+- Commit messages (Conventional Commits)
+  - feat: add Jina reranker integration to service
+  - fix: handle empty description when building candidate_text
+  - docs: add Serbian-only fine-tuning quick guide
+  - refactor: extract ES client init
+  - perf: batch reranker requests
+- Code style and structure
+  - Python 3.9+. Prefer type hints and clear docstrings.
+  - Keep notebook cells small and reusable. If logic grows, extract a .py helper and import into the notebook.
+  - Use Windows-friendly paths in docs and examples (e.g., models\fine_tuned_reranker).
+  - Do not introduce hard-coded credentials or file system paths; use environment variables.
+
+2. Secrets and data privacy
+- Never commit secrets
+  - Keep credentials (Elasticsearch, API keys, tokens) only in environment variables or secret stores.
+  - Suggested environment variables: ES_URL, ES_API_KEY_ID, ES_API_KEY_SECRET, RERANKER_MODEL, BATCH_SIZE.
+  - Local-only .env files must not be committed.
+- Product data governance
+  - Treat product data and any user interaction logs as confidential.
+  - Do not commit raw datasets. Use small, sanitized samples for examples.
+  - Ensure logs and metrics do not contain PII.
+- Models and large artifacts
+  - Do not commit large model files or HF caches. Store fine-tuned models outside the repo (e.g., models\fine_tuned_reranker locally, artifact storage remotely).
+
+3. Model training and evaluation policy
+- Task and models
+  - Cross-encoder reranking with jinaai/jina-reranker-v2-base-multilingual as the default base.
+  - For Serbian specialization, prefer supervised fine-tuning on Serbian pairs (pointwise or pairwise) with hard negatives.
+- Training choices
+  - Full fine-tuning: LR 1e-5–2e-5, epochs 1–3, weight decay 0.01, warmup 5–10%.
+  - Adapter (LoRA) fine-tuning: LR 2e-4–5e-4, r≈16, alpha≈32, dropout≈0.05; train attention Q/K/V (+optional output dense).
+  - For an extra Serbian specialization pass: LR 5e-6–1e-5, 1–2 epochs.
+- Evaluation requirements
+  - Maintain a fixed candidate pool per query (e.g., top 100 from ES) for fair comparisons.
+  - Report at least nDCG@10 and MRR@10; include Recall@50 if labels allow.
+  - Track average and P95 reranking latency for your batch size and hardware.
+  - Fix a random seed; document dataset split versions and label sources.
+- Acceptance criteria (guideline)
+  - New models should not regress prior best by more than 1% absolute on nDCG@10; otherwise, provide justification.
+  - Include a short markdown or CSV with metrics in the PR (do not commit large artifacts).
+
+4. Serbian-specific robustness guidelines
+- Script and diacritics
+  - Cover both Latin and Cyrillic scripts during training/validation.
+  - Include diacritics-on and diacritics-off variants to mirror user behavior.
+- Morphology and variants
+  - Include Ekavian/Ijekavian where relevant.
+- Token preservation
+  - Preserve model numbers/brands and hyphenated tokens; avoid over-normalization.
+
+5. Documentation policy
+- When you change how indexing, retrieval, reranking, or evaluation works:
+  - Update README.md (append an “Updated YYYY-MM-DD” section) with user-facing changes.
+  - If training guidance changes, update jinaai_jina-reranker-v2-base-multilingua.md.
+  - Keep Windows PowerShell examples and backslash paths for local usage.
+- Keep examples minimal and copy-paste runnable.
+
+6. Release and deployment notes
+- Reranker service
+  - Expose a simple /rerank endpoint that accepts { query, docs } and returns scores.
+  - Batch inputs for throughput; enable FP16 on CUDA where available.
+  - Configure via env vars (MODEL path/name, BATCH_SIZE, device selection); never hard-code secrets.
+- Elasticsearch
+  - In production, enable TLS and auth; prefer API keys. Configure snapshots for backups.
+
+7. Manual QA checklist (before merging)
+- Run sample.ipynb end-to-end on Windows with ES running (Docker or Elastic Cloud).
+- Verify that reranking improves the top-10 ordering against ES-only for a small labeled set.
+- Confirm that no secrets are exposed in code, configs, or outputs.
+- Ensure README.md and this guidelines file reflect any behavior changes (date-stamped updates).
+
+See also
+- README.md for project overview, quickstart, evaluation guidance, and Serbian specialization quick guide.
+- jinaai_jina-reranker-v2-base-multilingua.md for detailed fine-tuning playbook (pointwise/pairwise, hard negatives, PEFT/LoRA, and evaluation).
